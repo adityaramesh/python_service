@@ -11,6 +11,7 @@ easier. It is based on the `daemon3x.py` file written by Chris Hager, and has
 been adapted to include the following additional features:
 
   - Creation and management of the PID file.
+  - Creation of the handle to the log file.
   - Registration of the signal handler for `SIGTERM`.
   - Implementation of the required init script functions (consult the
     documentation for the inidividual member functions for more details).
@@ -25,7 +26,7 @@ I have adapted the original daemonizing code in the following ways:
     attempt to do something stupid like read from a TTY.
   - The standard streams are closed instead of redirected to `/dev/null`.
     Daemons should not be using the standard streams anyway, so this seemed like
-    a cleaner option.
+    the cleanest option.
   - Standard output and error are flushed by the parent process before `fork` is
     called. Otherwise, this might lead to duplicate messages being printed
     later.
@@ -43,6 +44,7 @@ The class derived from `service` must fulfill the following responsibilities:
   - Overriding `run` to implement the daemon.
   - Optionally overriding `terminate` to respond to `SIGTERM` (e.g. closing file
     descriptors).
+  - Invoking `self.log.close()` in the `terminate` function.
   - Optionally overriding the `restart`, `reload`, and `force_reload` functions.
   - Optionally override `make_daemon`. You would want to do this if, for
     example, the daemon is created by another program. In this case, the
@@ -183,18 +185,19 @@ class service:
 	  - `stop_timeout` is the maximum number of floating-point seconds to
 	    wait for the daemon to respond to `SIGTERM`.
 	"""
-	def __init__(self, service_path, pidfile, start_timeout = 10, stop_timeout = 1):
-		basename = os.path.basename(service_path)
+	def __init__(self, service_path, pidfile, logfile, start_timeout = 10, stop_timeout = 1):
+		self.service_name = os.path.basename(service_path)
 		assert(start_timeout >= 0)
 		assert(stop_timeout >= 0)
-		assert(len(basename) != 0)
+		assert(len(self.service_name) != 0)
 
 		self.parent        = True
 		self.service_path  = service_path
 		self.pidfile       = pidfile
+		self.logfile       = logfile
 		self.start_timeout = start_timeout
 		self.stop_timeout  = stop_timeout
-		self.log           = logger(basename)
+		self.log           = logger(self.service_name)
 
 	"""
 	Spawns the daemon. The parent process stays alive until it ensures that
@@ -209,7 +212,7 @@ class service:
 	"""
 	def make_daemon(self):
 		# Flush remaining buffer contents initially, so that we do not
-		# get duplicate messages being printed later.
+		# get duplicate messages printed later.
 		sys.stdout.flush()
 		sys.stderr.flush()
 
@@ -244,6 +247,7 @@ class service:
 		except OSError as e:
 			self.log.log_status(False)
 			self.log.log_failure(str(e))
+			sys.exit(1)
 
 		# Register the handlers.
 		signal.signal(signal.SIGTERM, self.terminate)
@@ -257,15 +261,23 @@ class service:
 		except IOError as e:
 			self.log.log_status(False)
 			self.log.log_failure("Failed to write to PID file: {0}".format(e))
-			return False
-		
+			sys.exit(1)
+
+		# Open the log file.
+		try:
+			self.log = open(self.logfile, "w+")
+		except IOError as e:
+			self.log.log_status(False)
+			self.log.log_failure("Failed to open log file: {0}".format(e))
+			sys.exit(1)
+
 		# Another option would be to redirect the standard streams to
 		# `/dev/null`, but daemons should not really be using these
 		# streams in the first place.
 		os.close(sys.stdin.fileno())
 		os.close(sys.stdout.fileno())
 		os.close(sys.stderr.fileno())
-		return True
+		self.run()
 	
 	"""
 	When the parent process forks to create a daemon, it must wait until it
@@ -285,7 +297,7 @@ class service:
 				os.close(self.status_put)
 				return False
 			elif len(r) == 1:
-				status = int(os.read(self.status_get, 1).decode("utf-8"))
+				status = os.read(self.status_get, 1)[0]
 				self.log.log_status(status == exit_success)
 				os.close(self.status_get)
 				os.close(self.status_put)
@@ -354,7 +366,7 @@ class service:
 	likely need to override this method.
 	"""
 	def terminate(self, signal, frame):
-		pass
+		self.log.close()
 
 	"""
 	Used by the daemon to log the initialization status.
@@ -363,9 +375,9 @@ class service:
 		if self.parent:
 			return
 		if success:	
-			os.write(self.status_put, bytes("0", "utf-8"))
+			os.write(self.status_put, bytearray([0]))
 		else:
-			os.write(self.status_put, bytes("1", "utf-8"))
+			os.write(self.status_put, bytearray([1]))
 
 	"""
 	Starts the daemon. Only the parent returns from this function; the
@@ -381,27 +393,15 @@ class service:
 	function and continues to log the initialization process.
 	"""
 	def start(self):
-		self.log.log_action("Starting AWS DNS service.")
+		self.log.log_action("Starting {0}".format(self.service_name))
 
 		# Check if the service is already running.
 		(_, status) = self.get_pid(assert_stopped)
 		if status == status_running:
 			return exit_no_action
 
-		success = self.make_daemon()
-		if self.parent:
-			# Only the parent process should return from this
-			# function.
-			return exit_success if success else exit_failure
-		elif not success:
-			# The daemon was not initialized successfully, so we
-			# terminate the child process.
-			sys.exit(1)
-		else:
-			# The daemon should not return from `run`, but should
-			# log whether initialization was successful, along with
-			# the appropriate status.
-			self.run()
+		# Create the daemon.
+		return exit_success if self.make_daemon() else exit_failure
 
 	"""
 	Stops the daemon. The return value of this function is determined as
@@ -419,7 +419,7 @@ class service:
 	still returned, but a warning message is printed.
 	"""
 	def stop(self):
-		self.log.log_action("Stopping AWS DNS service.")
+		self.log.log_action("Stopping {0}".format(self.service_name))
 
 		(pid, status) = self.get_pid(assert_running)
 		if not (status == status_running or status == status_unknown):
@@ -428,7 +428,8 @@ class service:
 		# Attempt to terminate the process.
 		killed = False
 		try:
-			# TODO FIXME use `sigqueue` with `self.stop_timeout`
+			# TODO: Use `sigqueue` with semaphore and
+			# `self.stop_timeout`.
 			for _ in range(5):
 				os.kill(pid, signal.SIGTERM)
 				time.sleep(0.1)
