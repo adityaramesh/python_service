@@ -16,11 +16,12 @@ data_file = os.path.join(base_dir, "dat/dummy.dat")
 
 class dummy_service(service):
 	def __init__(self):
-		super(dummy_service, self).__init__("dummy_service", pidfile, logfile)
+		super(dummy_service, self).__init__("dummy_service", pidfile)
 		self.terminating = False
 
 	def run(self):
-		logging.basicConfig(stream=self.log, level=logging.DEBUG)
+		logging.basicConfig(filename=logfile, filemode="w+",
+			level=logging.DEBUG)
 
 		try:
 			self.fd = open(data_file, "w+")
@@ -56,5 +57,5 @@ r = {
 	"reload"       : s.reload,
 	"force-reload" : s.force_reload,
 	"status"       : s.status
-}.get(sys.argv[1], s.usage)()
+}.get(sys.argv[1] if len(sys.argv) > 1 else "usage", s.usage)()
 sys.exit(r)

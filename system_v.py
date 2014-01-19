@@ -11,7 +11,6 @@ easier. It is based on the `daemon3x.py` file written by Chris Hager, and has
 been adapted to include the following additional features:
 
   - Creation and management of the PID file.
-  - Creation of the handle to the log file.
   - Registration of the signal handler for `SIGTERM`.
   - Implementation of the required init script functions (consult the
     documentation for the inidividual member functions for more details).
@@ -42,9 +41,9 @@ The class derived from `service` must fulfill the following responsibilities:
 
   - Subclassing the `service` class.
   - Overriding `run` to implement the daemon.
-  - Optionally overriding `terminate` to respond to `SIGTERM` (e.g. closing file
+  - Overriding `terminate` to respond to `SIGTERM` (e.g. closing file
     descriptors).
-  - Invoking `self.log.close()` in the `terminate` function.
+  - Error logging.
   - Optionally overriding the `restart`, `reload`, and `force_reload` functions.
   - Optionally override `make_daemon`. You would want to do this if, for
     example, the daemon is created by another program. In this case, the
@@ -52,7 +51,6 @@ The class derived from `service` must fulfill the following responsibilities:
     program.
   - The daemon must call `self.log_status(True)` or `self.log_status(False)`
     to report the initialization status when `run` is called.
-  - The should log error messages to a log file.
   - Parsing the configuration file (if any).
 
 [unix_notes]:
@@ -185,7 +183,7 @@ class service:
 	  - `stop_timeout` is the maximum number of floating-point seconds to
 	    wait for the daemon to respond to `SIGTERM`.
 	"""
-	def __init__(self, service_path, pidfile, logfile, start_timeout = 10, stop_timeout = 1):
+	def __init__(self, service_path, pidfile,  start_timeout = 10, stop_timeout = 1):
 		self.service_name = os.path.basename(service_path)
 		assert(start_timeout >= 0)
 		assert(stop_timeout >= 0)
@@ -194,7 +192,6 @@ class service:
 		self.parent        = True
 		self.service_path  = service_path
 		self.pidfile       = pidfile
-		self.logfile       = logfile
 		self.start_timeout = start_timeout
 		self.stop_timeout  = stop_timeout
 		self.log           = logger(self.service_name)
@@ -261,14 +258,6 @@ class service:
 		except Exception as e:
 			self.log.log_status(False)
 			self.log.log_failure("Failed to write to PID file: {0}".format(e))
-			sys.exit(1)
-
-		# Open the log file.
-		try:
-			self.log = open(self.logfile, "w+")
-		except Exception as e:
-			self.log.log_status(False)
-			self.log.log_failure("Failed to open log file: {0}".format(e))
 			sys.exit(1)
 
 		# Another option would be to redirect the standard streams to
