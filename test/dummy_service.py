@@ -35,7 +35,7 @@ class dummy_service(service):
 			try:
 				self.fd.write("Poop\n")
 				self.fd.flush()
-			except IOError as e:
+			except Exception as e:
 				logging.warning("Write failed: {0}".format(e))
 			time.sleep(1)
 

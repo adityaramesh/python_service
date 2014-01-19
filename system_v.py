@@ -244,7 +244,7 @@ class service:
 			# Change the directory to a predetermined existing
 			# directory.
 			os.chdir("/")
-		except OSError as e:
+		except Exception as e:
 			self.log.log_status(False)
 			self.log.log_failure(str(e))
 			sys.exit(1)
@@ -258,7 +258,7 @@ class service:
 		try:
 			with open(self.pidfile, "w+") as f:
 				f.write(pid)
-		except IOError as e:
+		except Exception as e:
 			self.log.log_status(False)
 			self.log.log_failure("Failed to write to PID file: {0}".format(e))
 			sys.exit(1)
@@ -266,7 +266,7 @@ class service:
 		# Open the log file.
 		try:
 			self.log = open(self.logfile, "w+")
-		except IOError as e:
+		except Exception as e:
 			self.log.log_status(False)
 			self.log.log_failure("Failed to open log file: {0}".format(e))
 			sys.exit(1)
@@ -304,7 +304,7 @@ class service:
 				return True
 			else:
 				self.log.log_status(False)
-				self.log.log_falure("Exceeded timeout value.")
+				self.log.log_failure("Exceeded timeout value.")
 				os.close(self.status_get)
 				os.close(self.status_put)
 				return False
@@ -470,12 +470,12 @@ class service:
 			return self.restart()
 	
 	"""
-	This method should be overridden by the derived class if the
-	functionality is desired, as reloading the configuration file is
-	dependent on the daemon. By default, it does nothing.
+	Reloads the configuration, possibly without restarting the service. By
+	default, this calls `force_reload`. The derived class can override this
+	function if a more efficient implementation is possible.
 	"""
 	def reload(self):
-		pass
+		return self.reload()
 
 	"""
 	By default, this restarts the daemon. The derived class can override
